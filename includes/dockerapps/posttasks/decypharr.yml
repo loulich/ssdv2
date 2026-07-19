@@ -1,0 +1,27 @@
+---
+# Le backend DFS de Decypharr (bibliothèque hanwen/go-fuse) appelle en dur
+# le binaire "fusermount", absent des images Alpine qui ne fournissent que
+# "fusermount3". Sans ce lien, le montage FUSE échoue silencieusement
+# (fusermount exited with code 256) et les symlinks créés par Decypharr
+# pointent vers un mount jamais monté.
+# Voir: https://github.com/hanwen/go-fuse/blob/master/fuse/mount_linux.go
+
+- name: Attendre que le conteneur decypharr soit démarré
+  community.docker.docker_container_info:
+    name: decypharr
+  register: decypharr_info
+  until: decypharr_info.container is defined and decypharr_info.container.State.Running
+  retries: 10
+  delay: 2
+
+- name: "Créer le lien fusermount -> fusermount3 (fix DFS mount)"
+  community.docker.docker_container_exec:
+    container: decypharr
+    command: /bin/sh -c "test -e /usr/bin/fusermount || ln -s /usr/bin/fusermount3 /usr/bin/fusermount"
+  ignore_errors: yes
+
+- name: "Redémarrer decypharr pour appliquer le montage DFS"
+  community.docker.docker_container:
+    name: decypharr
+    state: started
+    restart: yes
