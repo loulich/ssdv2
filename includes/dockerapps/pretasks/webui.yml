@@ -315,7 +315,7 @@
 
       - "{{ ssd_backend_dir }}/data:/app/data"
       - "{{ ssd_backend_dir }}/logs:/app/logs"
-      - "/mnt:/mnt"
+      - "/mnt:/mnt:rslave"
 
     expose:
       - "8080"
