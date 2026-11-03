@@ -235,6 +235,10 @@
     recreate: true
     restart_policy: unless-stopped
 
+    # Fuite mémoire uvicorn (~10 Go) : sans limite, la VM entière gèle
+    memory: "2g"
+    memory_swap: "2g"
+
     groups:
       - "{{ docker_gid | string }}"
 
