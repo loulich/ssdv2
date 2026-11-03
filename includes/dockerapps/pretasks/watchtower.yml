@@ -7,8 +7,10 @@
 
 - name: Deploy watchtower
   docker_container:
+    labels:
+      ssdv2.app: "{{pgrole}}"
     name: "watchtower"
-    image: "nickfedor/watchtower:latest"
+    image: "nickfedor/watchtower:1.22.0"
     pull: yes
     command: '--cleanup --schedule "0 0 4 * * *"'
     state: started

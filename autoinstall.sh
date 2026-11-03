@@ -33,6 +33,11 @@ DOCKER_RUNTIME_STAMP="${STATE_DIR}/docker-runtime.ok"
 export SETTINGS_SOURCE
 export SETTINGS_STORAGE
 
+# Le cache de session des variables account.yml contient des secrets
+# dechiffres : il est systematiquement supprime en sortie, et purge au demarrage.
+trap 'rm -f "${SETTINGS_STORAGE}/.account.cache.json"' EXIT
+rm -f "${SETTINGS_STORAGE}/.account.cache.json" >/dev/null 2>&1
+
 log() {
 	echo "[install.sh] $*"
 }
@@ -54,6 +59,12 @@ require_sudo() {
 	if [ "$(id -u)" -ne 0 ]; then
 		sudo -n true >/dev/null 2>&1 || fail "sudo sans mot de passe est requis pour l'agent"
 	fi
+}
+
+ensure_ssdv2ctl_wrapper() {
+	local script="${SETTINGS_SOURCE}/includes/config/scripts/ensure_ssdv2ctl_wrapper.sh"
+	HOME="$CURRENT_HOME" SETTINGS_SOURCE="$SETTINGS_SOURCE" OWNER="$CURRENT_USER" \
+		"$script" >/dev/null 2>&1 || true
 }
 
 write_env_file() {
@@ -185,6 +196,10 @@ EOF
 [defaults]
 command_warnings = False
 deprecation_warnings = False
+# Supprime l'avertissement "args template" (docker_container: "{{ docker_info }}")
+# et le risque d'écrasement par des facts. Les playbooks doivent utiliser
+# ansible_facts['...'] (ex. ansible_facts['env']) et non ansible_env.
+inject_facts_as_vars = False
 inventory = ${CURRENT_HOME}/.ansible/inventories/local
 interpreter_python = ${SETTINGS_SOURCE}/venv/bin/python
 vault_password_file = ${CURRENT_HOME}/.vault_pass
@@ -422,6 +437,7 @@ cd "${SETTINGS_SOURCE}"
 mkdir -p "${STATE_DIR}"
 
 write_env_file
+ensure_ssdv2ctl_wrapper
 
 # shellcheck disable=SC1091
 source "${SETTINGS_SOURCE}/includes/functions.sh"

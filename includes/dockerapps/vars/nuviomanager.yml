@@ -1,0 +1,28 @@
+---
+pgrole: 'nuviomanager'
+intport: '3100'
+image: 'ghcr.io/guiro28/nuvio-manager:latest'
+
+pg_volumes:
+  - "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/{{ pgrole }}/data:/app/data:rw"
+
+# Choix de l'authentification (interne/externe) géré par l'assistant de l'app.
+pg_env:
+  TZ: 'Europe/Paris'
+  # Derrière Traefik : fait confiance à X-Forwarded-* (avec les plages privées
+  # Docker par défaut). Sans cela, l'app répond 403 « Hôte non autorisé » sur
+  # /api/* tant que PUBLIC_URL n'est pas encore défini, et le middleware d'erreur
+  # oauth2-proxy transforme ce 403 en page de connexion → boucle.
+  TRUST_PROXY_IPS: '127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,fc00::/7,fe80::/10'
+
+extra_labels:
+  # Priorité basse du router principal : garantit que le router /relay/
+  # (priorité 100) l'emporte même si la règle Host générée est longue.
+  traefik.http.routers.nuviomanager-rtr.priority: '10'
+  traefik.http.routers.nuviomanager-relay-rtr.entrypoints: 'http,https'
+  traefik.http.routers.nuviomanager-relay-rtr.rule: "Host(`{{ sub[pgrole][pgrole] if sub_enabled else pgrole }}.{{ user.domain }}`) && PathPrefix(`/relay/`)"
+  traefik.http.routers.nuviomanager-relay-rtr.priority: '100'
+  traefik.http.routers.nuviomanager-relay-rtr.tls: 'true'
+  traefik.http.routers.nuviomanager-relay-rtr.tls.certresolver: 'letsencrypt'
+  traefik.http.routers.nuviomanager-relay-rtr.service: 'nuviomanager-svc'
+  traefik.http.routers.nuviomanager-relay-rtr.middlewares: 'chain-no-auth@file'

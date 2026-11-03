@@ -1,39 +1,61 @@
 ---
 pgrole: 'streamfusion'
 intport: '8080'
-image: 'limedrive/stream-fusion-reborn:latest'
+
+image: 'laster13/stream-fusion-reborn:latest'
+
 pg_volumes:
   - stream-fusion:/app/config
   - taskiq-logs:/app/config/logs
   - torrent-cache:/var/cache/torrents
   - imdb-db:/data/imdb_db
-  - db-backups:/data/backups
+  - sfr-db-backups:/data/backups
+
 pg_env:
   RUN_MIGRATIONS: "true"
-  MEILI_MASTER_KEY: "{{ MEILI_MASTER_KEY }}"
-  PROXY_URL: http://warp:1080
-  MEILI_HOST: meilisearch
-  MEILI_PORT: "7700"
-  TASKIQ_REDIS_DB: "6"
+
   SECRET_API_KEY: "{{ SECRET_API_KEY }}"
+  ADMIN_SECRET_KEY: "{{ ADMIN_SECRET_KEY }}"
   CONFIG_SECRET_KEY: "{{ CONFIG_SECRET_KEY }}"
   PEER_MASTER_KEY: "{{ PEER_MASTER_KEY }}"
   TMDB_API_KEY: "{{ TMDB_API_KEY }}"
-  REDIS_HOST: "stremio-redis"
+
+  PG_USER: "streamfusion_runtime"
+  PG_PASS: "{{ PG_PASS }}"
   PG_BASE: "streamfusion"
-  PG_USER: "streamfusion"
-  PG_PASS: "streamfusion"
-  USE_HTTPS: "true"
+
+  PG_MIGRATION_USER: "streamfusion_migration"
+  PG_MIGRATION_PASS: "{{ PG_MIGRATION_PASS }}"
+
+  PG_OWNER_ROLE: "streamfusion_owner"
+
   TZ: "Europe/Paris"
+  USE_HTTPS: "true"
+  PROXY_URL: "http://warp:1080"
+
+  REDIS_HOST: "stremio-redis"
+  PG_HOST: "stremio-postgres"
+  TASKIQ_REDIS_DB: "6"
+
 traefik_labels_enabled: false
+
 specific_docker_info:
-  expose:
+  name: stream-fusion
+
+  exposed_ports:
     - "8080"
+
+  published_ports:
+    - "8080:8080"
+
   cap_drop:
     - ALL
+
   security_opts:
     - "no-new-privileges:true"
+
   read_only: true
+
   tmpfs:
     - "/tmp:mode=1777"
     - "/home/appuser:uid=1000,gid=1000,mode=0700"

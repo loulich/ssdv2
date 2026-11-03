@@ -1,0 +1,92 @@
+---
+# Déploiement des conteneurs compagnons de l'indexeur Torznab StreamFusion.
+#   - sftorznab        : indexeur PostgreSQL   (conteneur principal, playbook générique)
+#   - sftorznab-broker : broker AllDebrid      (ci-dessous)
+# Les deux services partagent la même image mais exécutent un processus différent.
+
+- name: Définir l'état d'exposition Traefik
+  set_fact:
+    sftorznab_expose: "{{ sftorznab_expose_public | default(false) | bool }}"
+
+- name: Déployer le broker AllDebrid
+  community.docker.docker_container:
+    labels:
+      ssdv2.app: "{{pgrole}}"
+    name: 'sftorznab-broker'
+    image: "{{ image }}"
+    state: started
+    pull: true
+    command:
+      - uvicorn
+      - app.alldebrid_broker:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - '8080'
+      - --no-access-log
+    env:
+      DATABASE_URL: "{{ DATABASE_URL }}"
+      ALLDEBRID_API_KEY: "{{ ALLDEBRID_API_KEY }}"
+      BROKER_TOKEN: "{{ ALLDEBRID_BROKER_TOKEN }}"
+      REDIS_URL: "{{ SFTORZNAB_REDIS_URL }}"
+      ALLDEBRID_GLOBAL_REDIS_URL: "{{ SFTORZNAB_REDIS_URL }}"
+      ALLDEBRID_GLOBAL_SECOND_LIMIT: '8'
+      ALLDEBRID_GLOBAL_MINUTE_LIMIT: '450'
+      BROKER_BATCH_SIZE: '20'
+      BROKER_PARALLEL_BATCHES: '4'
+      BROKER_COALESCE_MS: '80'
+      BROKER_POSITIVE_TTL: '300'
+      HTTP_PROXY: 'http://warp:1080'
+      HTTPS_PROXY: 'http://warp:1080'
+      NO_PROXY: 'localhost,127.0.0.1,sftorznab-broker,stremio-postgres,stremio-redis'
+      TZ: 'Europe/Paris'
+    networks:
+      - name: traefik_proxy
+    restart_policy: unless-stopped
+    read_only: true
+    tmpfs:
+      - '/tmp:mode=1777'
+    cap_drop:
+      - ALL
+    security_opts:
+      - no-new-privileges:true
+  no_log: true
+
+- name: Préparer le compte rendu Prowlarr
+  set_fact:
+    sftorznab_report: >-
+      {{
+        [
+          '══════════════════════════════════════════════════════════════',
+          '   StreamFusion Torznab  ·  configuration Prowlarr',
+          '══════════════════════════════════════════════════════════════',
+          '',
+          '  Indexeur PostgreSQL',
+          '         Nom           : StreamFusion PostgreSQL'
+        ]
+        + (
+          ['         URL publique  : https://' ~ (sub[pgrole][pgrole] if sub_enabled else pgrole) ~ '.' ~ user.domain ~ '/torznab']
+          if sftorznab_expose else []
+        )
+        + (
+          ['         URL interne   : http://' ~ pgrole ~ ':' ~ intport ~ '/torznab']
+          if sftorznab_expose else
+          ['         URL           : http://' ~ pgrole ~ ':' ~ intport ~ '/torznab']
+        )
+        + [
+          '         API Path      : /api',
+          '         API Key       : ' ~ INDEXER_API_KEY,
+          '',
+          '  Broker AllDebrid : http://sftorznab-broker:8080   (interne, sans auth)',
+          '',
+          '  ── Vérification ───────────────────────────────────────────────',
+          '     docker exec ' ~ pgrole ~ ' python -c "import urllib.request;print(urllib.request.urlopen(' ~ "'" ~ 'http://127.0.0.1:' ~ intport ~ '/torznab/api?t=caps&apikey=' ~ INDEXER_API_KEY ~ "'" ~ ').status)"',
+          '',
+          '  Prowlarr > Indexeurs > Ajouter > Generic Torznab',
+          '══════════════════════════════════════════════════════════════'
+        ]
+      }}
+
+- name: Compte rendu de l'installation
+  ansible.builtin.debug:
+    msg: "{{ sftorznab_report }}"

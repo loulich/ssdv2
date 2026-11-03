@@ -1,11 +1,8 @@
+# shellcheck shell=bash
+
 menu_ajout_supp_applis() {
   clear
   manage_apps
-}
-
-
-menu_change_domaine () {
-  "${SETTINGS_SOURCE}/includes/config/scripts/domain.sh"
 }
 
 
@@ -76,16 +73,18 @@ menu_suppression_utilisateur_authelia() {
   echo -e "${CRED}"$(gettext "Suppression Utilisateurs Authelia")               "${CEND}"
   echo -e "${CRED}---------------------------------------------------------------${CEND}"
   echo ""
-  grep displayname "${SETTINGS_STORAGE}/docker/${USER}/authelia/users.yml" | cut -d: -f2 | tr -d '"' | cat -n | sed 's/[ ]\+/ /g' | tr " " " " | tr "\t" " " > temp
-  while read LIGNE
+  local tempfile
+  tempfile=$(mktemp)
+  grep displayname "${SETTINGS_STORAGE}/docker/${USER}/authelia/users.yml" | cut -d: -f2 | tr -d '"' | cat -n | sed 's/[ ]\+/ /g' | tr " " " " | tr "\t" " " > "$tempfile"
+  while read -r LIGNE
   do echo -e "${CCYAN}"$LIGNE"${CEND}"
-  done < temp
+  done < "$tempfile"
   echo ""
   echo >&2 -n -e "${CCYAN}"$(gettext "Choisir le numéro de l'utilisateur :") "${CEND}"
-  read NUMERO_LIGNE
-  UTILISATEUR=$(sed -n "${NUMERO_LIGNE}p" temp | cut -d ' ' -f 4)
+  read -r NUMERO_LIGNE
+  UTILISATEUR=$(sed -n "${NUMERO_LIGNE}p" "$tempfile" | cut -d ' ' -f 4)
   sed -i "/##${UTILISATEUR}##/,/##${UTILISATEUR}##/d" "${SETTINGS_STORAGE}/docker/${USER}/authelia/users.yml"
-  rm temp
+  rm -f "$tempfile"
   echo ""
   echo -e "\e[32m"$(gettext "L'utilisateur ${UTILISATEUR} a été supprimé")"\e[0m"
   docker restart authelia >/dev/null 2>&1
@@ -144,7 +143,7 @@ menu_change_sous_domaine() {
 
   grep "plex" $SERVICESPERUSER >/dev/null 2>&1
   if [ $? -eq 0 ]; then
-    ansible-playbook ${SETTINGS_SOURCE}/includes/config/roles/plex/tasks/main.yml
+    ansible-playbook ${SETTINGS_SOURCE}/includes/dockerapps/vars/plex.yml
     sed -i "/plex/d" $SERVICESPERUSER >/dev/null 2>&1
   fi
 
@@ -255,7 +254,8 @@ function ajout_app_seedbox() {
 
 function menu_suppression_application() {
   line=$1
-  suppression_appli ${line} 1
+  # Sans second argument : demande si les données doivent être conservées.
+  suppression_appli "${line}"
   pause
   affiche_menu_db
 }
@@ -264,14 +264,14 @@ function menu_suppression_application() {
 function menu_reinit_container() {
   line=$1
   log_write "Reinit du container ${line}" >/dev/null 2>&1
-  echo -e "\e[32m"$(gettext "Les volumes ne seront pas supprimés")"\e[0m" 
-  subdomain=$(get_from_account_yml "sub.${line}.${line}")
+  echo -e "\e[32m"$(gettext "Les volumes ne seront pas supprimés")"\e[0m"
 
 
-  suppression_appli "${line}"
+  # suppression_appli retire déjà les volumes anonymes de l'app (FIX-07) ;
+  # plus de nettoyage global des volumes non utilisés de la machine.
+  suppression_appli "${line}" 0
   rm -f "${SETTINGS_STORAGE}/conf/${line}.yml"
   rm -f "${SETTINGS_STORAGE}/vars/${line}.yml"
-  docker volume rm $(docker volume ls -qf "dangling=true") >/dev/null 2>&1
   echo ""
   echo ${line} >>$SERVICESPERUSER
   if [[ "${line}" = zurg ]]; then
@@ -289,3 +289,107 @@ function menu_reinit_container() {
   read -r
 }
 
+
+function menu_maj_container() {
+  line=$1
+  log_write "Mise à jour du container ${line}" >/dev/null 2>&1
+  echo -e "\e[32m"$(gettext "Mise à jour de l'image (sans réinstallation)")"\e[0m"
+  echo -e "\e[32m"$(gettext "Les volumes ne seront pas supprimés")"\e[0m"
+  echo ""
+  update_container "${line}"
+  checking_errors $?
+  echo ""
+  echo -e "${BLUE}### ${line}" $(gettext "a été mis à jour") "###${NC}"
+  echo ""
+  echo -e "\n $(gettext "Appuyer sur") ${CCYAN}[$(gettext "ENTREE")]${CEND} $(gettext "pour continuer")"
+  read -r
+}
+
+
+function menu_diagnostic_nettoyage() {
+  clear
+  logo
+  echo -e "${BLUE}### DIAGNOSTIC / NETTOYAGE ###${NC}"
+  echo ""
+
+  local db="${SETTINGS_SOURCE}/ssddb"
+  local conf="${SETTINGS_STORAGE}/conf"
+  local apps
+  mapfile -t apps < <(sqlite3 "$db" "select name from applications;" 2>/dev/null)
+
+  echo "-- Registres conteneurs manquants --"
+  local missing=0
+  local a
+  for a in "${apps[@]}"; do
+    # traefik n'a pas de registre applicatif (géré à part)
+    [ "$a" = "traefik" ] && continue
+    if [ ! -s "${conf}/${a}.containers" ]; then
+      echo "   ${a}"
+      missing=$((missing + 1))
+    fi
+  done
+  [ "$missing" -eq 0 ] && echo "   aucun"
+
+  echo ""
+  echo "-- Conteneurs orphelins (label ssdv2.app sans application en base) --"
+  local name label
+  local orphans=()
+  while read -r name label; do
+    [ -z "$name" ] && continue
+    printf '%s\n' "${apps[@]}" | grep -qx "$label" || orphans+=("$name")
+  done < <(docker ps -a --filter label=ssdv2.app --format '{{.Names}} {{.Label "ssdv2.app"}}' 2>/dev/null)
+  if [ ${#orphans[@]} -eq 0 ]; then
+    echo "   aucun"
+  else
+    printf '   %s\n' "${orphans[@]}"
+  fi
+
+  echo ""
+  echo "-- Volumes anonymes orphelins --"
+  local nvol
+  nvol=$(docker volume ls -qf dangling=true | wc -l)
+  echo "   ${nvol}"
+
+  echo ""
+  local resp
+  if [ "$missing" -gt 0 ]; then
+    read -rp "Régénérer les registres manquants ? (y/n) : " resp
+    [[ "$resp" == "y" ]] && bash "${SETTINGS_SOURCE}/patches/20260916_backfill_registries"
+  fi
+  if [ ${#orphans[@]} -gt 0 ]; then
+    read -rp "Supprimer les conteneurs orphelins listés ? (y/n) : " resp
+    [[ "$resp" == "y" ]] && docker rm -f -v "${orphans[@]}"
+  fi
+  if [ "$nvol" -gt 0 ]; then
+    read -rp "Supprimer les volumes anonymes orphelins ? (y/n) : " resp
+    if [[ "$resp" == "y" ]]; then
+      docker volume ls -qf dangling=true | xargs -r docker volume rm -f
+    fi
+  fi
+
+  pause
+}
+
+# BEGIN decypharrgate
+# Menu de gestion de la cache gate decypharr (Sonarr v5).
+if [ -f "${SETTINGS_SOURCE}/includes/menus-decypharrgate.sh" ]; then
+  # shellcheck source=menus-decypharrgate.sh
+  source "${SETTINGS_SOURCE}/includes/menus-decypharrgate.sh"
+fi
+# END decypharrgate
+
+# BEGIN phpcve
+# Menu d'audit et de remediation des CVE PHP2Shell.
+if [ -f "${SETTINGS_SOURCE}/includes/menus-phpcve.sh" ]; then
+  # shellcheck source=menus-phpcve.sh
+  source "${SETTINGS_SOURCE}/includes/menus-phpcve.sh"
+fi
+# END phpcve
+
+# BEGIN plexcve
+# Menu d'audit et de remediation Plex2Shell.
+if [ -f "${SETTINGS_SOURCE}/includes/menus-plexcve.sh" ]; then
+  # shellcheck source=menus-plexcve.sh
+  source "${SETTINGS_SOURCE}/includes/menus-plexcve.sh"
+fi
+# END plexcve

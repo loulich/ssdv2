@@ -137,6 +137,7 @@
       - name: traefik_proxy
 
     labels:
+      ssdv2.app: "{{pgrole}}"
       traefik.enable: "true"
       traefik.http.routers.ssd-frontend-rtr.entrypoints: "https"
       traefik.http.routers.ssd-frontend-rtr.rule: 'Host(`{{sub[pgrole][pgrole] if sub_enabled else pgrole}}.{{user.domain}}`)'
@@ -182,6 +183,7 @@
       - name: traefik_proxy
 
     labels:
+      ssdv2.app: "{{pgrole}}"
       traefik.enable: "true"
 
       traefik.http.routers.saison-frontend-rtr.entrypoints: "https"
@@ -197,6 +199,7 @@
 - name: Ask if AllDebrid WARP proxy should be enabled
   ansible.builtin.pause:
     prompt: |
+      SSDV2_PROMPT {"id": "webui.warp", "label": "Activer le proxy WARP ?", "kind": "confirm", "secret": false}
       Activer le proxy WARP pour AllDebrid ?
       Recommandé uniquement sur Oracle Cloud si AllDebrid bloque magnet/upload.
 
@@ -328,6 +331,7 @@
       - name: traefik_proxy
 
     labels:
+      ssdv2.app: "{{pgrole}}"
       traefik.enable: "true"
       traefik.http.routers.ssd-backend-rtr.entrypoints: "https"
       traefik.http.routers.ssd-backend-rtr.rule: '(Host(`{{sub[pgrole][pgrole] if sub_enabled else pgrole}}.{{user.domain}}`) && PathPrefix(`/api/v1`))'

@@ -1,0 +1,26 @@
+---
+pgrole: 'stremioaddonproxy'
+intport: '7000'
+image: 'ghcr.io/guiro28/stremio-addon-proxy:latest'
+
+pg_volumes:
+  - "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/{{ pgrole }}:/app/data:rw"
+
+pg_env:
+  PORT: '7000'
+  DATA_DIR: '/app/data'
+  UPSTREAM_MODE: 'socks'
+  UPSTREAM_URL: 'socks5://warp:1080'
+  PUBLIC_URL: "https://{{ sub[pgrole][pgrole] if sub_enabled else pgrole }}.{{ user.domain }}"
+  AUTH_USER: "{{ user.name }}"
+  AUTH_PASS: "{{ user.pass }}"
+
+extra_labels:
+  traefik.http.routers.stremioaddonproxy-public-rtr.entrypoints: 'http,https'
+  traefik.http.routers.stremioaddonproxy-public-rtr.rule: "Host(`{{ sub[pgrole][pgrole] if sub_enabled else pgrole }}.{{ user.domain }}`) && (Path(`/play`) || PathRegexp(`^/[^/]+/.*`))"
+  traefik.http.routers.stremioaddonproxy-public-rtr.priority: '100'
+  traefik.http.routers.stremioaddonproxy-public-rtr.tls: 'true'
+  traefik.http.routers.stremioaddonproxy-public-rtr.tls.certresolver: 'letsencrypt'
+  traefik.http.routers.stremioaddonproxy-public-rtr.middlewares: 'chain-no-auth@file'
+  traefik.http.routers.stremioaddonproxy-public-rtr.service: 'stremioaddonproxy-public-svc'
+  traefik.http.services.stremioaddonproxy-public-svc.loadbalancer.server.port: '7000'

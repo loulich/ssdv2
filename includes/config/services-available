@@ -2,12 +2,12 @@ actualbudget - App for managing your finances
 aiostreams - Adonn Stremio
 airdcpp - Client AirDC++
 alfred - Symlink Manager
+audiobookshelf - Serveur d'audiobooks et podcasts auto-hébergé
 authelia - Authentification applications Web
 autoindex - Générateur de liste de répertoires
 baserow - Outil no-code pour BDD modulable
 baikal - logiciel de calendrier simple
 bazarr - Gestion de sous-titres Sonarr/Radarr
-benphelps - Intégrations Docker et API de service
 beszel - Monitoring de serveur avec alertes
 bitwarden - Gestionnaire de mots de passeL
 bookstack - Wiki gratuit et open source
@@ -23,6 +23,7 @@ coolify - manage servers, applications, databases
 crowdsec - Detection et blocage des attaques
 cypht - Centraliser plusieurs comptes mails
 decypharr - QbitTorrent with a Multiple Debrid
+decypharrgate - Cache gate Decypharr pour Sonarr v5+ (multi-instances)
 dashdot - System Health intégrable avec Homarr
 davos - Outils de programmation
 decypharrseed- decypharr Seed
@@ -47,7 +48,6 @@ frenchio - Stremio orienté contenu francophone
 gethomepage - dashboard Applications
 gitea - Hébergement de développement logiciel
 gitlab - Hébergement de développement logiciel
-glftpd - Serveur FTP
 goaccess - Visual Web Log Analyzer
 gotify - Envoyer et recevoir des messages
 grabb2rss - centralise les grabs de vos instances Arrs
@@ -61,10 +61,8 @@ huntarr - Chasseur médias automatisé
 imagmaid - Plex Image Cleanup
 immich - self-hosted photo video management
 jackett - Indexeur de scraping
-jackettstremio - Indexeur de scraping
 jackettvpn - Indexeur de scraping
 jdownloader - Gestionnaire de téléchargements
-jellyseerr - Gestion de contenu Plex/Emby
 jellyfin - Serveur multimédia
 jfago - Gestion des utilisateurs Jellyfin
 jitsi - Plateformes de visioconférence
@@ -78,18 +76,19 @@ librespeed - Speedtest auto-hébergé pour HTML5
 lidarr - Gestionnaire de musiques
 linkding - Gestionnaire de favoris
 logarr - Gestion des logs
+maintainerr - Gestion automatisée des collections Plex/Jellyfin
 mango - Serveur de mangas auto-hébergé
-Mattermost - Plateforme de collaboration
+mattermost - Plateforme de collaboration
 mealie - Gestion de vos recettes
 mediawiki - plateforme pour Wikipédia
-mediaflowproxy - Proxy pour Stremio
+mediaflowproxy - Proxy de streaming MediaFlow pour Stremio et IPTV
 medusa - Gestionnaire de séries, animes
 mellow - client proxy
 metube - Téléchargement YouTube auto-hébergé
 microbin - Application Web paste bin
 minecraft - Jeu d'aventure immersif
 mkvtoolnix - Gestion de fichiers MKV
-monicaHQ - CRM pour votre vie personnelle
+monicahq - CRM pour votre vie personnelle
 monitorr - Gérer votre système et réseau
 n8nio - Outil de Workflow open-source
 navidrome - Serveur de streaming musical
@@ -99,7 +98,8 @@ nextcloud - Stockage et partage de fichiers
 nocodb - Plateforme NoCode open source
 nowshowing - Addon Plex
 ntopng - Surveiller réseau informatique
-nZBHydra - Indexeurs newznab
+nuviomanager - Dashboard de gestion des comptes, profils et addons Nuvio/Tuvora
+nzbhydra - Indexeurs newznab
 nzbdav - WebDAV Server Usenet
 ombi - Gestion de contenu Plex/Emby
 organizr - Gestion des applications
@@ -111,6 +111,7 @@ plausible - Alternative  à Google Analytics
 plexautolanguages - Addon plex sous titres
 plex - Serveur multimédia
 portainer - Gestion docker
+prestashop - Plateforme e-commerce
 prowlarr - Indexeur de scraping
 pterodactyl - game server management panel
 pureftpd - Serveur FTP
@@ -123,35 +124,41 @@ radarr - Gestion Films Usenet-BitTorrent
 rdtclient - Clients Real debrid
 readarr - Gestion ebook Usenet-BitTorrent
 recyclarr - Trash Guide Customs Formats
+remux - Serveur multimédia compatible API Jellyfin (Stremio, WebDAV, torrent)
 rflood - Un gestionnaire de torrent
 rtorrentvpn - Gestionnaire de torrent VPN
 rutorrent_2 - Un gestionnaire de torrent
 rutorrent - Un gestionnaire de torrent
 sabnzbd - Téléchargement de newsgroups
 scrutiny  - Solution de monitoring
+scrob - Suivi de vos médias (Jellyfin/Plex/Emby)
 seafile - Stockage cloud open source
 seerr -  Gestion de contenu Plex/Emby
 seerrcatalog - Passerelle entre Jellyseerr et Stremio
 seasonarr - Assistant Sonarr pour packs de saisons
+sffs - Catalogue StreamFusion en bibliothèque Silo patché (prérequis : silosffs)
+sftorznab - Indexeurs Torznab StreamFusion (PostgreSQL + Meilisearch) pour Prowlarr
 shaarli - Bookmarking personnel
+shieldcontroller - Gestion NVIDIA Shield / Android TV (écran, APK, applications)
 sickchill - Gestion Films/Séries
 sickgear - Gestionnaire Films/Séries
+silo - Serveur multimédia (alternative à Plex/Jellyfin)
+silosffs - Silo patché pour sffs, instance indépendante (installer avant sffs)
+slicksync - Gestion des utilisateurs et addons Stremio/Nuvio
 sismicsreader - Agrégateur flux Web
 sonarr4k - Gestion Séries 4K
 sonarr - Gestion Séries Usenet et BitTorren
 speedtest - Teste vitesse Internet
 speedtesttracker - Teste vitesse Internet
+ssdv2webui - Interface d'administration SSDV2
 statping - Surveillance de vos sites Web
 stirlingpdf - Boite à outils PDF
 streamfusion - addon for Stremio streaming
-stremiocatalogs - addon for Stremio that provides catalogs
-stremiotrakt - addon for Stremio that provides trakt lists
-stremiosaga - addon for Stremio that provides saga infos
-stremiotmdbdice - addon for Stremio that provides shuffle movies suggestions
-stremiomanager - App for re-organizing your Stremio addons
+stremfin - Serveur compatible Jellyfin pour addons Stremio/Nuvio
+stremioaddonproxy - Proxy pour les addons Stremio
 stremthru - Proxy pour Stremio
 subsonic - Serveur multimédia
-symlinkrepair - Repérez et réparez les symlinks cassés dans vos bibliothèques Radarr et Sonarr
+symlink - Gestion seedbox : nettoyage de liens cassés (Radarr/Sonarr), import Radarr et nettoyage AllDebrid
 synclounge - Adon Plex
 syncthing - Synchronisation de fichiers
 tautulli - Monitoring de Plex
@@ -162,9 +169,10 @@ tracearr - Monitoring temps reel Plex Jellyfin Emby
 tracker_dashboard - Suivi stats trackers BitTorrent
 ttrss - Agrégateur de flux d'actualités
 ubooquity - Gestion ebooks
-usenet - Un gestionnaire de nzb
 vaultwarden - Serveur compatible Bitwarden
 vikunja - Application de liste de tâches
+vnstat - Surveillance du trafic réseau
+vvveb - CMS et constructeur de pages (blog, e-commerce)
 wallos - Gestion des abonnements
 warp - VPN/proxy développé par Cloudflare
 watchtower - Mises à jour automatiques Docker
@@ -172,7 +180,6 @@ webdav - Service d'hébergement de fichiers
 webui - Interface gestion ssdv2
 webtop - Gestion d'environnements
 weddingshare - Partage Moments Ensembles
-wetty - Terminal sur HTTP et https
 wgeasy - Gestion WireGuard
 whisparr - Gestionnaire de films pour adultes
 wikijs - Une application wiki moderne
@@ -181,6 +188,7 @@ wireguard - Protocole de communication (VPN).
 wizarr - Invitation utilisateurs Plex et Jellyfin
 wordpress - Gestion de contenu (CMS)
 yacht - Gestion des conteneurs Docker
+yamtrack - Tracker de médias (films, séries, animes, mangas, jeux, livres, comics, jeux de société)
 ygege - Indexeur pour YggTorrent
 yourls - Gestion de liens
 zilean - DMM hashlist scrapper
