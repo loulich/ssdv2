@@ -509,7 +509,7 @@ function choose_services() {
   echo -e " ${BWHITE}-->" $(gettext "Services en cours d'installation") ":${NC}"
   rm -Rf "${SERVICESPERUSER}" >/dev/null 2>&1
   touch $SERVICESPERUSER
-  jq -r '.selected_lines[] | split("-")[0] | gsub("\""; "")' output.json > $SERVICESPERUSER
+  jq -r '.selected_lines[] | split(" - ")[0] | gsub("\""; "")' output.json > $SERVICESPERUSER
   echo -e "${GREEN}$(cat $SERVICESPERUSER)${NC}"
 }
 
@@ -793,6 +793,13 @@ function suppression_appli() {
     sudo fusermount -uz ${SETTINGS_STORAGE}/docker/${USER}/jellygrail/Video_Library
     sudo rm -rf ${SETTINGS_STORAGE}/docker/${USER}/jellygrail
     ;;
+  polyfin)
+    # Ancien emplacement des secrets, avant leur déplacement dans le dossier
+    # applicatif. Les nouveaux secrets sont supprimés avec le dossier polyfin.
+    if [ $DELETE -eq 1 ]; then
+      sudo rm -rf "${SETTINGS_STORAGE}/docker/${USER}/polyfin-secrets" >/dev/null 2>&1
+    fi
+    ;;
   espocrm*)
     sudo rm -rf ${SETTINGS_STORAGE}/docker/${USER}/mysql
     sudo rm -rf ${SETTINGS_STORAGE}/docker/${USER}/espocrm >/dev/null 2>&1
@@ -906,6 +913,20 @@ SQL
 
     if [ $DELETE -eq 1 ]; then
       sudo rm -rf ${SETTINGS_STORAGE}/docker/${USER}/projet-ssd >/dev/null 2>&1
+    fi
+    ;;
+  ssdv2proxy)
+    # Passerelles VPN créées à l'exécution par ssdv2-vpn-controller : elles
+    # portent le label ssdv2.vpn.owner (et non ssdv2.app), donc elles
+    # n'apparaissent ni dans le registre automatique ni dans les conventions
+    # de nom. Suppression ciblée par label.
+    docker ps -aq --filter 'label=ssdv2.vpn.owner=ssdv2-proxy-manager' \
+      | xargs -r docker rm -f >/dev/null 2>&1 || true
+    # Mot de passe de l'interface (conf/ssdv2proxy.auth) : secret hors dossier
+    # applicatif, retiré en suppression complète uniquement (conservé avec les
+    # données, comme le login de l'application).
+    if [ $DELETE -eq 1 ]; then
+      rm -f "${SETTINGS_STORAGE}/conf/${APPSELECTED}.auth" >/dev/null 2>&1
     fi
     ;;
   vvveb)
@@ -1638,6 +1659,42 @@ function change_password() {
   launch_service traefik
 }
 
+# Modifier le proxy StreamFusion sans rejouer les questions ni mettre à jour l'image.
+function streamfusion_proxy() {
+  local proxy_value py
+  if [ "$#" -gt 1 ]; then
+    echo 'Usage : streamfusion_proxy [URL|--disable]' >&2
+    return 2
+  fi
+  case "${1-}" in
+    --help|-h)
+      echo 'Usage : streamfusion_proxy [URL|--disable] ; sans argument : saisie masquée.'
+      return 0
+      ;;
+    --disable) proxy_value='' ;;
+    '')
+      if [ "$#" -eq 1 ]; then
+        proxy_value=''
+      else
+        printf 'SSDV2_PROMPT %s\n' '{"id":"streamfusion.proxy_url","label":"Nouveau proxy (- pour désactiver)","kind":"secret","secret":true}' >&2
+        printf 'PROXY_URL (- pour désactiver) : ' >&2
+        IFS= read -rs proxy_value || return 1
+        printf '\n' >&2
+        if [ -z "$proxy_value" ]; then
+          echo 'Aucune modification ; utilisez --disable pour désactiver le proxy.' >&2
+          return 0
+        fi
+        [ "$proxy_value" != '-' ] || proxy_value=''
+      fi
+      ;;
+    --*) echo 'Usage : streamfusion_proxy [URL|--disable]' >&2; return 2 ;;
+    *) proxy_value="$1" ;;
+  esac
+  py="${SETTINGS_SOURCE}/venv/bin/python"
+  [ -x "$py" ] || py=python3
+  printf '%s' "$proxy_value" | SETTINGS_STORAGE="${SETTINGS_STORAGE}" "$py" "${SETTINGS_SOURCE}/includes/config/scripts/streamfusion_proxy.py"
+}
+
 function relance_container() {
   line=$1
   log_write "Relance du container ${line}" >/dev/null 2>&1
@@ -1897,7 +1954,7 @@ function applis_perso_create() {
 function copie_applis() {
   rm -Rf "${SERVICESPERUSER}" >/dev/null 2>&1
   touch $SERVICESPERUSER
-  jq -r '.selected_lines[] | split("-")[0] | gsub("\""; "")' output.json | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' > "$SERVICESPERUSER"
+  jq -r '.selected_lines[] | split(" - ")[0] | gsub("\""; "")' output.json | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' > "$SERVICESPERUSER"
   echo -e "\e[36m##" $(gettext "Copie des fichiers dans le dossier vars") "##\e[0m"  
   while IFS= read -r line; do
     if [ -e "${SETTINGS_SOURCE}/includes/dockerapps/vars/${line}.yml" ]; then

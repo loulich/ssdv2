@@ -1,3 +1,154 @@
+11/11/2026 — OAuth2 Proxy : diagnostic et réparation assistés
+
+- nouvelle commande `ssdv2ctl security oauth2 status|repair|rollback` et
+  backend `includes/config/scripts/oauth2_repair.py`.
+- deux entrées de menu sous « Sécuriser Traefik avec OAuth2 Proxy » :
+  diagnostic (lecture seule) et réparation avec confirmation.
+- réparation idempotente : sauvegarde, correction des règles Traefik,
+  installation des pages, recréation conditionnelle d'oauth2-proxy, génération
+  des routeurs API/SSE de transition, vérifications finales.
+- sortie `--text` lisible pour `status`, `repair` et `rollback` (résumé compact
+  et prochaine action), le JSON restant le format par défaut.
+- rollback vers le conteneur et les règles sauvegardés.
+
+11/11/2026 — OAuth2 Proxy : sessions fiables et routes API préservées
+
+- passage à oauth2-proxy v7.15.6 (correctif CVE-2026-40575) avec
+  `--trusted-proxy-ip` et suppression de `--skip-auth-route`.
+- séparation des chaînes Traefik : `chain-oauth2-proxy` (navigation HTML,
+  middleware `errors` limité aux 401) et `chain-oauth2-proxy-api` (API/SSE,
+  sans `errors`).
+- deux routeurs par application protégée (`<app>-rtr` HTML et `<app>-api-rtr`)
+  pour ne plus transformer un 401/403 applicatif en page de connexion OAuth2.
+- `addAuthCookiesToResponse = ["_oauth2_proxy"]` sur le ForwardAuth : le cookie
+  rafraîchi est renvoyé au navigateur, fin des rafraîchissements Google à
+  chaque requête (rafales de plus de 100 refresh/seconde observées).
+- `--cookie-csrf-per-request` et `--cookie-csrf-expire` pour les connexions
+  multi-onglets.
+- routeur `/oauth2/` en priorité 1000 pour ne plus être éclipsé par un routeur
+  applicatif.
+- pages de connexion et d'erreur personnalisées SSDV2 (`sign_in.html`,
+  `error.html`) copiées dans `/etc/oauth2_proxy/templates` et activées par
+  `--custom-templates-dir`.
+- documentation `docs/oauth2-proxy.md`.
+
+06/11/2026 — CrowdSec : exclusion des applis indépendante de l'IP
+
+- whitelist `whitelist-ssdv2` étendue aux routeurs Traefik des applications
+  média et compagnons (Polyfin, Jellyfin, Emby, Silo, SiloSFFS, Stremfin,
+  StreamFusion, Plex, Flixor, Crosswatch, Scrob, Nuvio Manager, Seerr,
+  Tautulli).
+- tous les `GET`/`HEAD` de ces routeurs sont ignorés quel que soit le statut
+  HTTP (200, 206, 304, 400, 401, 403, 404, 499…). Corrige les bans déclenchés
+  par un client avec un token expiré ou par le polling d'un tableau de bord,
+  sans dépendre de l'adresse IP du client.
+- les `POST`/`PUT`/`PATCH`/`DELETE` de playback/progression en 401/403 sont
+  couverts, mais les chemins d'authentification (contenant `/authenticate`,
+  dont `/Users/AuthenticateByName`) restent protégés contre le brute-force.
+- nouvelles options `trusted_apps`, `fqdns` et `routers` dans
+  `crowdsec/whitelist.yml` pour ajouter une application de confiance.
+- validation des domaines/routeurs et test automatique `cscli explain`
+  (requête Crosswatch 401) dans la posttask.
+
+06/11/2026 — Beszel : agent derrière Cloudflare Access
+
+- l'agent utilise désormais `HUB_URL=http://127.0.0.1:8090` par défaut au lieu
+  de l'URL publique : la connexion WebSocket interne contourne Cloudflare
+  Access (fini les `unexpected status code: 302`).
+- le hub publie son port uniquement sur `127.0.0.1`, ce qui rend cette URL
+  interne joignable depuis l'agent en `network_mode: host` sans exposer le
+  service.
+- l'agent écoute uniquement sur `127.0.0.1:45876` : plus de port SSH agent
+  exposé publiquement, le mode WebSocket reste suffisant.
+- `beszel_agent_hub_url` et `beszel_agent_listen_bind` sont surchargeables
+  dans `~/seedbox/vars/beszel.yml`.
+
+06/11/2026 — CrowdSec : correctif de mise à jour
+
+- recréation propre du conteneur CrowdSec avant chaque installation :
+  corrige les ports malformés (`7422/tcp/tcp`) et l'ancien binding
+  `0.0.0.0:8080` qui empêchaient la posttask et donc le déploiement de la
+  whitelist.
+- LAPI publié sur un port libre choisi par Docker sur `127.0.0.1` : plus de
+  conflit avec un service déjà présent sur 8181. Le firewall bouncer est
+  configuré avec le port réellement attribué.
+- exclusion des 404/403 sur les domaines média (Polyfin, Jellyfin, Silo,
+  Stremfin, StreamFusion, Plex), indépendante de l'IP du client.
+- ajout de l'IP publique de sortie réelle (`api.ipify.org`) à la whitelist.
+- nettoyage unique des décisions locales existantes lors de la migration,
+  sans demander l'IP de l'utilisateur.
+- vérification explicite que `whitelist-ssdv2` est chargée par CrowdSec.
+
+06/11/2026 — CrowdSec : exclusions SSDV2
+
+- whitelist générique `whitelist-ssdv2` déployée par la posttask CrowdSec :
+  IP publique du serveur, réseaux Tailscale/ULA/link-local, faux positifs des
+  applications média (404 Polyfin/WebUI, 403 playback, crawl `/Items`,
+  `/Users`, `/playback`, `/gAAAA`, `/api/v2/`).
+- fichier `crowdsec/whitelist.yml` pour les IP/CIDR propres à l'utilisateur,
+  avec `media_crawl` activable ou désactivable.
+- suppression automatique des décisions CrowdSec pour les IP/réseaux
+  whitelistés, y compris les décisions CAPI présentes lors du nettoyage
+  (elles peuvent réapparaître ensuite).
+- validation `crowdsec -t` avant redémarrage et restauration de la whitelist
+  précédente en cas d'erreur.
+
+05/11/2026 — Plex public HTTPS : correctifs d'exploitation
+
+- Traefik `accessLog` : seuls les codes `400-599` sont journalisés. Une ligne
+  par segment vidéo Plex faisait grossir `access.log` de plusieurs Go et
+  exposait les tokens `X-Plex-Token`.
+- CrowdSec : whitelist `local/plex-clients-whitelist` livrée avec le dépôt,
+  limitée au routeur `plex-rtr` et aux chemins de lecture. `public-https
+  --apply` l'installe (et la retire en `--disable`). Corrige les bans en boucle
+  déclenchés par Infuse/Plex Web (décision par IP : tout le foyer était coupé).
+- allowlist : **Cloudflare uniquement**, suppression des réseaux
+  privés/Tailscale (aucun client n'accède aux apps via Traefik en direct).
+  Validation `plexcve.py` mise à jour en conséquence.
+- Tautulli : posttask qui aligne `pms_url` sur `https://plex:32400`
+  (`verify_ssl_cert=0`) en mode public HTTPS.
+- `plexautolanguages` : `PLEX_URL` pointe sur le domaine HTTPS public
+  (l'application ne sait pas désactiver la vérification du certificat).
+- `plexautolanguages` : garde-fou — si `plex.token` est le token du serveur
+  (`PlexOnlineToken`), l'application est arrêtée. python-plexapi
+  ré-enregistrerait le serveur comme client (`provides="controller"`) sur
+  plex.tv, ce qui le rend invisible dans les clients Plex.
+- doc : contournement Plex Web/Safari (HEVC en MPEG-TS = écran noir) et
+  applications compagnon.
+
+04/11/2026 — Plex public HTTPS (opt-in)
+
+- nouveau mode `plex.public_https` dans `account.yml` (désactivé par défaut) :
+  Plex sur `https://plex.<domaine>` en direct (DNS-only, 443, certificat
+  Let's Encrypt), sans port ; 32400 fermé et publié uniquement sur
+  `127.0.0.1`.
+- Traefik : `chain-plex@file` (CrowdSec/rate-limit/secure-headers, sans
+  allowlist), backend Plex `scheme=https` + `plex-transport@file`
+  (`insecureSkipVerify` pour le certificat `plex.direct`).
+- les chaînes non-Plex reçoivent `middlewares-allowlist@file` (Cloudflare
+  uniquement) lorsque le mode est actif : l'accès direct public aux autres
+  applications renvoie 403.
+- source unique des CIDR Cloudflare (`traefik_cloudflare_ips`) pour
+  `forwardedHeaders` et l'allowlist ; écriture des middlewares avant les
+  chaînes pour éviter l'erreur transitoire au reload Traefik.
+- DNS Plex en DNS-only via le paramètre `proxied` du rôle Cloudflare.
+- préférences Plex appliquées en HTTPS local : `secureConnections=0`
+  (Required), `RelayEnabled=0`, `PublishServerOnPlexOnlineKey=1`,
+  `customConnections=https://plex.<domaine>` sans `:443`,
+  `ManualPortMappingPort=0`.
+- `plexcve.py` : action `public-https` (activation/désactivation), scan étendu
+  (chain-plex, backend HTTPS, transport, prefs, allowlist, loopback, tokens
+  dans `access.log`), `fix-plex --public-https`, rollback complet
+  (Plex + Preferences.xml + règles Traefik + DNS).
+- menu **Audit Plex** : options 9 (activer) et 10 (restaurer), aide et textes
+  mis à jour. Patch `20261104_plex_public_https` pour les installations
+  existantes.
+- documentation : `docs/plex-public-https.md`, mise à jour de
+  `docs/plex2shell.md`, `docs/verification-32400-443.md` et
+  `docs/mecanismes.md`.
+- faux négatif connu : le voyant « Remote Access » de Plex teste 32400 et
+  peut rester jaune ; se fier à l'URL personnalisée et à un test 4G.
+
 31/10/2026 — mise à jour « image seule » et volumes anonymes
 
 - correction de la mise à jour « image seule » : les volumes anonymes

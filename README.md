@@ -41,8 +41,9 @@ L'objectif reste le même : rendre l'administration de son serveur plus simple, 
 | **Administration** | Utiliser le menu CLI ou l'interface Web pour piloter les opérations courantes. |
 | **Maintenance** | Retrouver les conteneurs, volumes et entrées DNS associés aux applications gérées. |
 | **Sécurité** | Gérer les accès et les données sensibles en s'appuyant sur les mécanismes prévus par le projet. |
+| **Plex public HTTPS** | Activer en option un accès direct `https://plex.<domaine>` (DNS-only, 443), tout en gardant les autres applications derrière Cloudflare uniquement. |
 
-> Pour aller plus loin : découvrez les [mécanismes internes de SSDv2](docs/mecanismes.md), notamment le cycle de vie des applications, les registres Docker et la gestion des invites sécurisées.
+> Pour aller plus loin : découvrez les [mécanismes internes de SSDv2](docs/mecanismes.md), notamment le cycle de vie des applications, les registres Docker et la gestion des invites sécurisées. Le mode Plex public HTTPS est documenté dans [docs/plex-public-https.md](docs/plex-public-https.md).
 
 ## Bien démarrer
 
@@ -57,6 +58,7 @@ Avant de commencer, vérifiez les prérequis techniques et prenez connaissance d
 | Ressource | Description |
 | :--- | :--- |
 | [Documentation officielle](https://projetssd.github.io/ssdv2_docs/) | Installation, configuration, applications et maintenance |
+| [StreamFusion](docs/streamfusion.md) | Installation, utilisation, réglages réseau et SSDV2 Proxy Manager |
 | [Mécanismes internes](docs/mecanismes.md) | Fonctionnement du déploiement, registres et sécurité |
 | [Historique des changements](CHANGELOG) | Évolutions et corrections apportées au projet |
 | [Charte graphique SSDv2](https://github.com/projetssd/branding) | Logos, couleurs et design system (accès selon les droits au dépôt) |

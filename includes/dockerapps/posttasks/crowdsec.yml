@@ -138,6 +138,40 @@
     mode: '0644'
   register: acquis_copy
 
+# --- Whitelist Plex -------------------------------------------------------
+# Plex Web et Infuse parcourent legitimement la bibliotheque (vignettes,
+# composites, hubs). Sans whitelist, CrowdSec les prend pour du scan
+# (http-probing / http-crawl-non_statics) et bannit l'IP du foyer, ce qui
+# coupe aussi l'acces aux autres apps. La whitelist est limitee au routeur
+# plex-rtr et aux chemins de lecture.
+- name: "Determiner si Plex est en mode public HTTPS"
+  ansible.builtin.set_fact:
+    plex_public_https_active: "{{ (plex | default({})).public_https | default(false) | bool }}"
+
+- name: "Deployer la whitelist CrowdSec des clients Plex"
+  become: true
+  ansible.builtin.copy:
+    src: "{{ settings.source }}/includes/config/files/crowdsec/plex-clients-whitelist.yaml"
+    dest: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/crowdsec/etc/parsers/s02-enrich/plex-clients-whitelist.yaml"
+    owner: root
+    group: root
+    mode: '0644'
+  when: plex_public_https_active
+  register: plex_whitelist_copy
+
+- name: "Retirer la whitelist CrowdSec Plex si le mode public est desactive"
+  become: true
+  ansible.builtin.file:
+    path: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/crowdsec/etc/parsers/s02-enrich/plex-clients-whitelist.yaml"
+    state: absent
+  when: not plex_public_https_active
+  register: plex_whitelist_remove
+
+- name: "Recharger CrowdSec apres changement de whitelist"
+  become: true
+  ansible.builtin.command: docker kill -s HUP crowdsec
+  when: (plex_whitelist_copy is changed) or (plex_whitelist_remove is changed)
+
 # --- Partie VI. Protéger l'hôte Docker avec CrowdSec (firewall bouncer iptables) ---
 
 - name: Vérifier que CrowdSec est lancé
@@ -210,6 +244,16 @@
     msg: "Impossible de récupérer la clé API du bouncer firewall CrowdSec."
   when: firewall_bouncer_api_key is not defined or firewall_bouncer_api_key == ""
 
+- name: Lire le port LAPI publié par CrowdSec
+  become: true
+  ansible.builtin.command: >-
+    docker inspect -f '{% raw %}{{ (index (index .NetworkSettings.Ports "8080/tcp") 0).HostPort }}{% endraw %}' crowdsec
+  register: crowdsec_lapi_port
+  changed_when: false
+  retries: 10
+  delay: 2
+  until: crowdsec_lapi_port.stdout | trim | length > 0
+
 # Déploiement de la conf du bouncer firewall
 # (Chemin standard : /etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml)
 - name: Déployer la configuration du firewall bouncer (iptables)
@@ -221,7 +265,7 @@
     group: root
     mode: '0600'
     content: |
-      api_url: http://127.0.0.1:8181/
+      api_url: http://127.0.0.1:{{ crowdsec_lapi_port.stdout | trim }}/
       api_key: {{ firewall_bouncer_api_key }}
 
       # Mode iptables (par défaut avec ce package)
@@ -273,11 +317,162 @@
   changed_when: false
   failed_when: crowdsec_collections_tainted.rc == 0
 
+# --- Exclusions SSDV2 (serveur et faux positifs des applis média) ---
+
+- name: Créer la configuration locale des exclusions CrowdSec
+  become: true
+  ansible.builtin.template:
+    src: "{{ settings.source }}/includes/dockerapps/templates/crowdsec/whitelist-config.yml.j2"
+    dest: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/crowdsec/whitelist.yml"
+    owner: "{{ lookup('env','USER') }}"
+    group: "{{ lookup('env','MYGID') }}"
+    mode: '0644'
+    force: false
+
+- name: Lire la configuration locale des exclusions CrowdSec
+  ansible.builtin.slurp:
+    src: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/crowdsec/whitelist.yml"
+  register: crowdsec_whitelist_config_raw
+
+- name: Analyser la configuration locale des exclusions CrowdSec
+  ansible.builtin.set_fact:
+    crowdsec_whitelist_config: "{{ (crowdsec_whitelist_config_raw.content | b64decode | from_yaml) | default({}, true) }}"
+
+# L'IP publique vue par internet peut différer de network.ipv4 : VPN de
+# l'hôte, changement d'adresse, etc. On l'ajoute aussi à la whitelist.
+- name: Découvrir l'IP publique sortante
+  ansible.builtin.uri:
+    url: https://api.ipify.org
+    return_content: true
+    timeout: 10
+  register: crowdsec_egress
+  changed_when: false
+  failed_when: false
+
+- name: Lire l'IP publique sortante
+  ansible.builtin.set_fact:
+    crowdsec_egress_ip: "{{ crowdsec_egress.content | default('') | trim }}"
+
+- name: Ignorer une IP publique sortante invalide
+  ansible.builtin.set_fact:
+    crowdsec_egress_ip: ""
+  when:
+    - crowdsec_egress_ip | length > 0
+    - not (crowdsec_egress_ip | ansible.netcommon.ipaddr)
+
+- name: Valider les IP et réseaux de la whitelist CrowdSec
+  ansible.builtin.assert:
+    that:
+      - >-
+        (item | ansible.netcommon.ipaddr) and (
+          (item | ansible.netcommon.ipaddr('version') | int == 4 and item | ansible.netcommon.ipaddr('prefix') | int >= 24)
+          or
+          (item | ansible.netcommon.ipaddr('version') | int == 6 and item | ansible.netcommon.ipaddr('prefix') | int >= 48)
+        )
+    fail_msg: >-
+      Entrée invalide ou trop large dans whitelist.yml : {{ item }}.
+      Utiliser une IP exacte, un CIDR IPv4 >= /24 ou un CIDR IPv6 >= /48.
+    quiet: true
+  loop: >-
+    {{
+      ([network.ipv4] if network.ipv4 is defined and network.ipv4 else [])
+      + (crowdsec_whitelist_config.ips | default([], true))
+      + (crowdsec_whitelist_config.cidrs | default([], true))
+    }}
+
+- name: Valider les domaines et routeurs de la whitelist CrowdSec
+  ansible.builtin.assert:
+    that:
+      - item is string
+      - item | trim | length > 0
+      - item is match('^[A-Za-z0-9._@-]+$')
+    fail_msg: >-
+      Entrée invalide dans whitelist.yml (fqdns/routers) : {{ item }}.
+      Utiliser un nom de domaine ou un nom de routeur Traefik simple.
+    quiet: true
+  loop: >-
+    {{
+      (crowdsec_whitelist_config.fqdns | default([], true))
+      + (crowdsec_whitelist_config.routers | default([], true))
+    }}
+
+- name: Créer le dossier des sauvegardes CrowdSec
+  become: true
+  ansible.builtin.file:
+    path: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/crowdsec/backups"
+    state: directory
+    owner: "{{ lookup('env','USER') }}"
+    group: "{{ lookup('env','MYGID') }}"
+    mode: '0700'
+
+- name: Vérifier la whitelist CrowdSec actuelle
+  become: true
+  ansible.builtin.stat:
+    path: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/crowdsec/etc/parsers/s02-enrich/whitelist-ssdv2.yaml"
+  register: crowdsec_whitelist_current
+
+- name: Sauvegarder la whitelist CrowdSec actuelle
+  become: true
+  ansible.builtin.copy:
+    src: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/crowdsec/etc/parsers/s02-enrich/whitelist-ssdv2.yaml"
+    dest: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/crowdsec/backups/whitelist-ssdv2.yaml.bak"
+    remote_src: true
+    owner: "{{ lookup('env','USER') }}"
+    group: "{{ lookup('env','MYGID') }}"
+    mode: '0600'
+  when: crowdsec_whitelist_current.stat.exists
+  changed_when: false
+
+- name: Déployer la whitelist CrowdSec SSDV2
+  become: true
+  block:
+    - name: Rendre la whitelist CrowdSec SSDV2
+      ansible.builtin.template:
+        src: "{{ settings.source }}/includes/dockerapps/templates/crowdsec/whitelist-ssdv2.yaml.j2"
+        dest: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/crowdsec/etc/parsers/s02-enrich/whitelist-ssdv2.yaml"
+        owner: root
+        group: root
+        mode: '0644'
+      register: crowdsec_whitelist_deploy
+
+    - name: Tester la configuration CrowdSec avec la whitelist
+      ansible.builtin.command: docker exec crowdsec crowdsec -t
+      register: crowdsec_whitelist_test
+      changed_when: false
+      when: crowdsec_whitelist_deploy.changed
+  rescue:
+    - name: Restaurer la whitelist CrowdSec précédente
+      ansible.builtin.copy:
+        src: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/crowdsec/backups/whitelist-ssdv2.yaml.bak"
+        dest: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/crowdsec/etc/parsers/s02-enrich/whitelist-ssdv2.yaml"
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0644'
+      when: crowdsec_whitelist_current.stat.exists
+
+    - name: Supprimer une whitelist invalide sans version précédente
+      ansible.builtin.file:
+        path: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/crowdsec/etc/parsers/s02-enrich/whitelist-ssdv2.yaml"
+        state: absent
+      when:
+        - not crowdsec_whitelist_current.stat.exists
+        - crowdsec_whitelist_deploy is defined
+        - crowdsec_whitelist_deploy.changed | default(false)
+
+    - name: Échouer si la configuration CrowdSec est invalide
+      ansible.builtin.fail:
+        msg: "La whitelist CrowdSec SSDV2 est invalide ; l'ancienne configuration a été restaurée."
+
 # Restart CrowdSec
 - name: Redémarrer CrowdSec si la configuration CrowdSec a changé
   become: true
   ansible.builtin.command: docker restart crowdsec
-  when: acquis_copy.changed or crowdsec_appsec_config.changed or crowdsec_base_config_install.changed
+  when: >-
+    acquis_copy.changed
+    or crowdsec_appsec_config.changed
+    or crowdsec_base_config_install.changed
+    or (crowdsec_whitelist_deploy.changed | default(false))
 
 - name: Attendre que CrowdSec soit relancé
   become: true
@@ -300,3 +495,137 @@
   retries: 12
   delay: 5
   until: crowdsec_appsec_health.rc == 0
+
+- name: Vérifier que la whitelist SSDV2 est chargée
+  become: true
+  ansible.builtin.command: docker exec crowdsec cscli parsers list
+  register: crowdsec_whitelist_loaded
+  changed_when: false
+  failed_when: false
+
+- name: Échouer si la whitelist SSDV2 n'est pas chargée
+  ansible.builtin.fail:
+    msg: "La whitelist whitelist-ssdv2 n'est pas chargée par CrowdSec."
+  when: "'whitelist-ssdv2' not in crowdsec_whitelist_loaded.stdout"
+
+# Vérifie qu'une requête GET légitime d'une application de confiance (401
+# inclus, cas typique d'un client Polyfin/Crosswatch avec un token expiré)
+# est bien ignorée par la whitelist. Le test utilise un routeur connu de la
+# whitelist et ne dépend donc pas de l'IP source ni du DNS réel.
+- name: Vérifier que les applis de confiance sont ignorées par la whitelist
+  become: true
+  ansible.builtin.shell: |
+    set -o pipefail
+    docker exec crowdsec cscli explain --type traefik --log '{"ClientAddr":"203.0.113.42:12345","ClientHost":"203.0.113.42","ClientPort":"12345","ClientUsername":"-","DownstreamContentSize":0,"DownstreamStatus":401,"Duration":1000,"OriginContentSize":0,"OriginDuration":0,"OriginStatus":401,"Overhead":1000,"RequestAddr":"crosswatch.{{ user.domain }}","RequestContentSize":0,"RequestCount":1,"RequestHost":"crosswatch.{{ user.domain }}","RequestMethod":"GET","RequestPath":"/api/config","RequestPort":"-","RequestProtocol":"HTTP/2.0","RequestScheme":"https","RetryAttempts":0,"RouterName":"crosswatch-rtr@docker","StartLocal":"2026-01-01T00:00:00.000000+01:00","StartUTC":"2026-01-01T00:00:00.000000Z","TLSCipher":"TLS_AES_128_GCM_SHA256","TLSVersion":"1.3","entryPointName":"https","level":"info","msg":"","request_User-Agent":"Mozilla/5.0","request_X-Forwarded-For":"203.0.113.42","request_X-Forwarded-Proto":"https","time":"2026-01-01T00:00:00+01:00"}' \
+      | grep -q 'ignored by whitelist'
+  args:
+    executable: /bin/bash
+  register: crowdsec_whitelist_behavior
+  changed_when: false
+  failed_when: false
+  retries: 3
+  delay: 2
+  until: crowdsec_whitelist_behavior.rc == 0
+  when: >-
+    crowdsec_whitelist_config.trusted_apps is not defined
+    or crowdsec_whitelist_config.trusted_apps is none
+    or crowdsec_whitelist_config.trusted_apps | bool
+
+- name: Échouer si la whitelist ne couvre pas les applis de confiance
+  ansible.builtin.fail:
+    msg: >-
+      La whitelist SSDV2 ne couvre pas les requêtes GET des applications
+      média/compagnons (test Crosswatch 401). Vérifier trusted_apps, fqdns
+      et routers dans whitelist.yml.
+  when:
+    - crowdsec_whitelist_config.trusted_apps is not defined or crowdsec_whitelist_config.trusted_apps is none or crowdsec_whitelist_config.trusted_apps | bool
+    - crowdsec_whitelist_behavior.rc | default(1) != 0
+
+# --- Nettoyage unique des décisions locales existantes ---
+
+- name: Vérifier si le nettoyage initial des décisions a été fait
+  ansible.builtin.stat:
+    path: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/crowdsec/.unban-local-done"
+  register: crowdsec_unban_done
+
+- name: Lister les décisions locales CrowdSec
+  become: true
+  ansible.builtin.command: docker exec crowdsec cscli decisions list -o json
+  register: crowdsec_local_decisions
+  changed_when: false
+  failed_when: false
+  when: not crowdsec_unban_done.stat.exists
+
+- name: Supprimer les décisions locales existantes (migration unique)
+  become: true
+  ansible.builtin.command: docker exec crowdsec cscli decisions delete --id {{ item.id }}
+  loop: >-
+    {{
+      (
+        (((crowdsec_local_decisions.stdout | default('') | trim) or '[]') | from_json | default([], true))
+        | selectattr('decisions')
+        | map(attribute='decisions')
+        | flatten
+        | list
+      )
+      if not crowdsec_unban_done.stat.exists else []
+    }}
+  register: crowdsec_unban_deletes
+  when: not crowdsec_unban_done.stat.exists
+  changed_when: false
+  failed_when: false
+
+- name: Marquer le nettoyage initial des décisions comme fait
+  become: true
+  ansible.builtin.file:
+    path: "{{ settings.storage }}/docker/{{ lookup('env','USER') }}/crowdsec/.unban-local-done"
+    state: touch
+    owner: "{{ lookup('env','USER') }}"
+    group: "{{ lookup('env','MYGID') }}"
+    mode: '0644'
+  when:
+    - not crowdsec_unban_done.stat.exists
+    - crowdsec_local_decisions is defined
+    - crowdsec_local_decisions.rc | default(1) == 0
+    - (crowdsec_unban_deletes.results | default([]) | selectattr('rc', 'defined') | selectattr('rc', 'ne', 0) | list | length) == 0
+
+# --- Nettoyage des décisions pour les IP/réseaux whitelistés ---
+
+- name: Supprimer les décisions CrowdSec pour les IP whitelistées
+  become: true
+  ansible.builtin.command: docker exec crowdsec cscli decisions delete --ip {{ item }}
+  loop: >-
+    {{
+      (
+        ([network.ipv4] if network.ipv4 is defined and network.ipv4 else [])
+        + ([crowdsec_egress_ip] if crowdsec_egress_ip | default('') else [])
+        + (crowdsec_whitelist_config.ips | default([], true))
+      ) | unique
+    }}
+  register: crowdsec_decisions_ip
+  changed_when: false
+  failed_when: false
+
+- name: Supprimer les décisions CrowdSec pour les réseaux whitelistés
+  become: true
+  ansible.builtin.command: docker exec crowdsec cscli decisions delete --range {{ item }} --contained
+  loop: >-
+    {{
+      ['100.64.0.0/10', 'fc00::/7', 'fe80::/10']
+      + (crowdsec_whitelist_config.cidrs | default([], true))
+    }}
+  register: crowdsec_decisions_cidr
+  changed_when: false
+  failed_when: false
+
+- name: Signaler les décisions CrowdSec non supprimées (IP)
+  ansible.builtin.debug:
+    msg: "Échec de suppression pour {{ item.item }} : {{ item.stderr | default('') }}"
+  loop: "{{ crowdsec_decisions_ip.results | default([]) }}"
+  when: item.rc | default(0) != 0
+
+- name: Signaler les décisions CrowdSec non supprimées (réseaux)
+  ansible.builtin.debug:
+    msg: "Échec de suppression pour {{ item.item }} : {{ item.stderr | default('') }}"
+  loop: "{{ crowdsec_decisions_cidr.results | default([]) }}"
+  when: item.rc | default(0) != 0

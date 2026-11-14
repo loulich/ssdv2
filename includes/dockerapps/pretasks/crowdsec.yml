@@ -4,6 +4,19 @@
   with_items:
     - "{{ settings.storage }}/docker/{{ lookup('env','USER') }}"
 
+# L'ancien conteneur peut avoir des ports malformés (7422/tcp/tcp) ou un
+# binding 0.0.0.0:8080 hérité d'une ancienne version. Le module
+# community.docker ne sait pas le réconcilier et échoue avant la posttask,
+# empêchant le déploiement de la whitelist. Les données sont dans des bind
+# mounts : on repart d'un conteneur propre à chaque installation.
+- name: Supprimer l'ancien conteneur CrowdSec
+  ansible.builtin.command: docker rm -f crowdsec
+  failed_when: false
+  changed_when: false
+
+# Le LAPI est publié sur la loopback via un port libre choisi par Docker :
+# aucun conflit possible avec un autre service (8181 ou autre). La posttask
+# lit ensuite le port réellement attribué pour configurer le firewall bouncer.
 - name: crowdsec
   docker_container:
     labels:
@@ -11,7 +24,7 @@
     image: crowdsecurity/crowdsec:latest
     name: crowdsec
     ports:
-      - "127.0.0.1:8181:8080"
+      - "127.0.0.1::8080"
     exposed_ports:
       - "7422" # AppSec (WAF), non publie sur l'hote
     volumes:

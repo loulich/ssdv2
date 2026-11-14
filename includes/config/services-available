@@ -26,7 +26,7 @@ decypharr - QbitTorrent with a Multiple Debrid
 decypharrgate - Cache gate Decypharr pour Sonarr v5+ (multi-instances)
 dashdot - System Health intégrable avec Homarr
 davos - Outils de programmation
-decypharrseed- decypharr Seed
+decypharrseed - decypharr Seed
 deemixrr - Streamer de la musique depuis deezer
 deluge - Gestionnaire de torrent
 digikam - Gestion de photos numériques
@@ -110,6 +110,7 @@ piwigo - Gestion d'albums photo
 plausible - Alternative  à Google Analytics
 plexautolanguages - Addon plex sous titres
 plex - Serveur multimédia
+polyfin - Serveur compatible Jellyfin (addons Stremio/Nuvio, IPTV) - auth Traefik : aucune
 portainer - Gestion docker
 prestashop - Plateforme e-commerce
 prowlarr - Indexeur de scraping
@@ -150,6 +151,8 @@ sonarr4k - Gestion Séries 4K
 sonarr - Gestion Séries Usenet et BitTorren
 speedtest - Teste vitesse Internet
 speedtesttracker - Teste vitesse Internet
+ssdv2-relay - Relais API AllDebrid via Cloudflare Worker (sans CA)
+ssdv2proxy - Gestion centralisée des manifestes Stremio et liens d'installation
 ssdv2webui - Interface d'administration SSDV2
 statping - Surveillance de vos sites Web
 stirlingpdf - Boite à outils PDF

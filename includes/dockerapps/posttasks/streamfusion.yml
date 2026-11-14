@@ -3,3 +3,4 @@
     msg:
       - "Configuration Stream Fusion : https://{{ sub[pgrole][pgrole] if sub_enabled else pgrole }}.{{ user.domain }}/admin"
       - "Documentation premier démarrage : https://docs.streamfusion.link/guides/premier-demarrage/"
+      - "Modifier le proxy : streamfusion_proxy ; désactiver : streamfusion_proxy --disable"

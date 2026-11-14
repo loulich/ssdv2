@@ -1,0 +1,67 @@
+---
+- name: Attendre que le relais soit sain
+  ansible.builtin.command:
+    cmd: docker inspect -f '{% raw %}{{.State.Health.Status}}{% endraw %}' ssdv2-relay
+  register: ssdv2_relay_health
+  until: (ssdv2_relay_health.stdout | default('') | trim) == 'healthy'
+  retries: 30
+  delay: 2
+  changed_when: false
+  failed_when: false
+
+- name: Tester AllDebrid via le relais
+  ansible.builtin.command:
+    cmd: |
+      docker exec ssdv2-relay node -e 'fetch("http://127.0.0.1:1080/v4/ping").then(r=>r.text()).then(t=>{console.log(t);process.exit(t.includes("success")?0:1)}).catch(()=>process.exit(1))'
+  register: ssdv2_relay_ping
+  changed_when: false
+  failed_when: false
+
+- name: Afficher l'état du relais
+  ansible.builtin.debug:
+    msg:
+      - "SSD Relay : {{ ssdv2_relay_health.stdout | default('inconnu') }}"
+      - "Ping AllDebrid via le Worker : {{ 'OK' if ssdv2_relay_ping.rc | default(1) == 0 else 'ÉCHEC' }}"
+      - "Aucun port publié, aucun flux vidéo via le Worker."
+      - "Secrets conservés dans {{ ssdv2_relay_secret_dir | default('...') }} : la réinstallation propose de les réutiliser ou de les modifier."
+
+- name: Présenter l'utilisation facultative du relais dans StreamFusion
+  ansible.builtin.debug:
+    msg:
+      - "L'installation du relais ne modifie pas les réglages et ne recrée pas les conteneurs StreamFusion / Taskiq."
+      - "Si vous souhaitez utiliser SSDV2 Relay, renseignez http://ssdv2-relay:1080 dans AD_BASE_URL depuis l'assistant d'installation StreamFusion."
+      - "Cette URL n'est pas un proxy HTTP CONNECT : ne la renseignez pas dans PROXY_URL. Votre proxy existant reste inchangé."
+      - "Usage prévu : Stremio avec lecture directe des liens vidéo par le lecteur."
+      - "Le relais traite uniquement les informations de l'API AllDebrid ; il ne transporte aucun flux vidéo."
+      - "Il ne constitue pas une sortie média pour StreamFusion ou SSDV2 Proxy Manager."
+
+- name: Avertir en cas d'échec du ping
+  ansible.builtin.debug:
+    msg:
+      - "⚠️ Le relais ne répond pas correctement à /v4/ping."
+      - "Relancez l'installation de ssdv2-relay : répondez n à la question"
+      - "« Conserver la configuration actuelle ? », puis"
+      - "vérifiez l'adresse, le jeton et la disponibilité du Worker."
+  when: ssdv2_relay_ping.rc | default(1) != 0
+
+# --- Protection de Warp ------------------------------------------------------
+
+- name: Vérifier le registre Streamfusion
+  ansible.builtin.stat:
+    path: "{{ settings.storage }}/conf/streamfusion.containers"
+  register: ssdv2_relay_sf_registry
+  changed_when: false
+
+- name: Retirer Warp du registre Streamfusion
+  ansible.builtin.lineinfile:
+    path: "{{ settings.storage }}/conf/streamfusion.containers"
+    line: "warp"
+    state: absent
+  when: ssdv2_relay_sf_registry.stat.exists
+
+- name: Confirmer que Warp reste disponible
+  ansible.builtin.debug:
+    msg:
+      - "Warp reste installé et n'est plus référencé dans le registre Streamfusion."
+      - "Les futurs reinstalls de Stream Fusion ne le supprimeront pas."
+  when: ssdv2_relay_sf_registry.stat.exists
