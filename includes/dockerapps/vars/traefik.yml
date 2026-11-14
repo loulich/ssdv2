@@ -313,7 +313,7 @@
         labelserror:
           traefik.enable: 'true'
           traefik.http.routers.error-pages-rtr.rule: 'HostRegexp(`.+`)'
-          traefik.http.routers.error-pages-rtr.priority: '10'
+          traefik.http.routers.error-pages-rtr.priority: '1'
           traefik.http.routers.error-pages-rtr.entrypoints: 'http,https'
           traefik.http.routers.error-pages-rtr.tls: 'true'
           traefik.http.routers.error-pages-rtr.middlewares: 'error-pages-middleware'
