@@ -29,18 +29,18 @@ accessLog:
 
 entryPoints:
   http:
-    address: ":80"
+    address: ":{{ traefik_http_port }}"
     forwardedHeaders:
       insecure: false
       # Source unique : includes/dockerapps/vars/traefik.yml
-      trustedIPs: {{ traefik_cloudflare_ips | to_json }}
+      trustedIPs: {{ traefik_trusted_ips | to_json }}
 
   https:
-    address: ":443"
+    address: ":{{ traefik_https_port }}"
     forwardedHeaders:
       insecure: false
       # Source unique : includes/dockerapps/vars/traefik.yml
-      trustedIPs: {{ traefik_cloudflare_ips | to_json }}
+      trustedIPs: {{ traefik_trusted_ips | to_json }}
 
 providers:
   docker:

@@ -39,7 +39,15 @@
     # Allowlist = Cloudflare uniquement : les autres apps ne sont joignables
     # que via le proxy Cloudflare. Aucun reseau prive/Tailscale n'est ajoute :
     # verifie en production, aucun client n'accede a Traefik en direct.
-    traefik_allowlist_ips: "{{ traefik_cloudflare_ips }}"
+    traefik_allowlist_ips: "{{ traefik_cloudflare_ips + traefik_extra_trusted_ips }}"
+    # Ports d'ecoute de Traefik (account.yml : traefik.http_port / traefik.https_port).
+    # Utile quand un autre reverse proxy (ex. Nginx Proxy Manager) occupe 80/443.
+    traefik_http_port: "{{ (traefik | default({})).http_port | default(80) }}"
+    traefik_https_port: "{{ (traefik | default({})).https_port | default(443) }}"
+    # Proxys amont supplementaires autorises a fournir X-Forwarded-*
+    # (account.yml : traefik.trusted_ips, liste ou chaine "cidr1,cidr2").
+    traefik_extra_trusted_ips: "{{ ([(traefik | default({})).trusted_ips | default([])] | flatten | join(',')).split(',') | map('trim') | reject('equalto', '') | list }}"
+    traefik_trusted_ips: "{{ traefik_cloudflare_ips + traefik_extra_trusted_ips }}"
     # Mode opt-in Plex public HTTPS : les autres chaines n'acceptent alors
     # que Cloudflare. Le flag est stocke dans account.yml sous
     # plex.public_https et pilote aussi le playbook Plex.
@@ -124,6 +132,24 @@
     # Important : ecrire les middlewares AVANT les chaines. Traefik surveille
     # le repertoire /rules et peut recharger entre deux fichiers ; l'ordre
     # inverse produit transitoirement « middleware ... does not exist ».
+    # Les chaines de middlewares-chains.toml referencent toujours crowdsec@file,
+    # defini dans rules/config.yml par la posttask CrowdSec. Sans CrowdSec, on
+    # depose un middleware "crowdsec" neutre au meme emplacement (sans ecraser
+    # un fichier existant) : la posttask CrowdSec le remplacera a l'installation.
+    - name: Create no-op crowdsec middleware when CrowdSec is not installed
+      copy:
+        dest: "{{ settings.storage }}/docker/{{pgrole}}/rules/config.yml"
+        force: no
+        mode: '0600'
+        content: |
+          # Middleware neutre : remplace par la posttask CrowdSec a l'installation.
+          http:
+            middlewares:
+              crowdsec:
+                headers:
+                  customRequestHeaders:
+                    X-Crowdsec-Disabled: ""
+
     - name: Import middlewares.toml
       template:
         src: "{{ settings.source }}/includes/dockerapps/templates/{{pgrole}}/middlewares.toml.j2"
@@ -140,7 +166,7 @@
           traefik.enable: 'true'
           ## HTTP-to-HTTPS Redirect
           traefik.http.routers.http-catchall.entrypoints: 'http'
-          traefik.http.routers.http-catchall.rule: 'HostRegexp(`{host:.+}`)'
+          traefik.http.routers.http-catchall.rule: 'HostRegexp(`.+`)'
           traefik.http.routers.http-catchall.middlewares: 'redirect-to-https'
           traefik.http.middlewares.redirect-to-https.redirectscheme.scheme: 'https'
           ## HTTP Routers
@@ -162,7 +188,7 @@
           traefik.enable: 'true'
           ## HTTP-to-HTTPS Redirect
           traefik.http.routers.http-catchall.entrypoints: 'http'
-          traefik.http.routers.http-catchall.rule: 'HostRegexp(`{host:.+}`)'
+          traefik.http.routers.http-catchall.rule: 'HostRegexp(`.+`)'
           traefik.http.routers.http-catchall.middlewares: 'redirect-to-https'
           traefik.http.middlewares.redirect-to-https.redirectscheme.scheme: 'https'
           ## HTTP Routers
@@ -181,12 +207,12 @@
         command: # CLI arguments
           - --global.checkNewVersion=true
           - --global.sendAnonymousUsage=true
-          - --entrypoints.http.address=:80
-          - --entrypoints.https.address=:443
+          - --entrypoints.http.address=:{{ traefik_http_port }}
+          - --entrypoints.https.address=:{{ traefik_https_port }}
           - --entrypoints.http.http.redirections.entrypoint.to=https
           - --entrypoints.http.http.redirections.entrypoint.scheme=https
           - --entrypoints.http.http.redirections.entrypoint.permanent=true
-          - "--entrypoints.https.forwardedHeaders.trustedIPs={{ traefik_cloudflare_ips | join(',') }}"
+          - "--entrypoints.https.forwardedHeaders.trustedIPs={{ traefik_trusted_ips | join(',') }}"
           - --api=true
           - --api.dashboard=true
           - --providers.docker.endpoint=unix:///var/run/docker.sock
@@ -230,8 +256,8 @@
           - --accesslog.addinternals
           - --global.checkNewVersion=false
           - --global.sendAnonymousUsage=false
-          - --entryPoints.http.address=:80
-          - --entryPoints.https.address=:443
+          - --entryPoints.http.address=:{{ traefik_http_port }}
+          - --entryPoints.https.address=:{{ traefik_https_port }}
           - --entrypoints.https.http.tls.certresolver=letsencrypt
           - --entrypoints.http.http.redirections.entrypoint.to=https
           - --entrypoints.http.http.redirections.entrypoint.scheme=https
@@ -265,8 +291,8 @@
         name: '{{pgrole}}'
         image: traefik:v3.6.1
         published_ports:
-          - "80:80"
-          - "443:443"
+          - "{{ traefik_http_port }}:{{ traefik_http_port }}"
+          - "{{ traefik_https_port }}:{{ traefik_https_port }}"
           - "127.0.0.1:8443:8443"
         env: '{{ traefik_env | default({}) }}'
         volumes:
@@ -286,7 +312,7 @@
       set_fact:
         labelserror:
           traefik.enable: 'true'
-          traefik.http.routers.error-pages-rtr.rule: 'HostRegexp(`{host:.+}`)'
+          traefik.http.routers.error-pages-rtr.rule: 'HostRegexp(`.+`)'
           traefik.http.routers.error-pages-rtr.priority: '10'
           traefik.http.routers.error-pages-rtr.entrypoints: 'http,https'
           traefik.http.routers.error-pages-rtr.tls: 'true'
@@ -303,6 +329,8 @@
         pull: yes
         env:
           TEMPLATE_NAME: app-down
+          # Renvoie le vrai code HTTP (404 pour un hote inconnu) au lieu de 200.
+          SEND_SAME_HTTP_CODE: 'true'
         labels: '{{labelserror}}'
         restart_policy: unless-stopped
         state: started
