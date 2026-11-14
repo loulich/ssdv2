@@ -1655,8 +1655,11 @@ function change_password() {
   read -r NEWPASS
   manage_account_yml user.pass "${NEWPASS}"
   manage_account_yml user.htpwd "$(htpasswd -nb "${USER}" "${NEWPASS}")"
-  docker rm -f traefik
-  launch_service traefik
+  # vars/traefik.yml est un playbook complet (comme dans install_traefik) :
+  # launch_service le passe en extra-vars et échoue, après que Traefik a déjà
+  # été supprimé. Le playbook supprime et recrée lui-même le conteneur.
+  ansible-playbook "${SETTINGS_SOURCE}/includes/dockerapps/vars/traefik.yml"
+  checking_errors $?
 }
 
 # Modifier le proxy StreamFusion sans rejouer les questions ni mettre à jour l'image.
