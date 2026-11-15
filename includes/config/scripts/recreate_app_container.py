@@ -146,6 +146,21 @@ def _apply_label_overrides(
     return labels
 
 
+def _merge_extra_hosts(existing: list | None, additions: list[str] | None) -> list | None:
+    """Ajoute des entrées HOTE:IP ; un hôte surchargé perd ses anciennes entrées.
+
+    Le même hôte peut être passé plusieurs fois (plusieurs IP)."""
+    if not additions:
+        return existing
+    for item in additions:
+        host, sep, ip = item.partition(":")
+        if not sep or not host or not ip:
+            raise SystemExit(f"--add-host attend HOTE:IP (reçu: {item!r})")
+    hosts = {item.partition(":")[0] for item in additions}
+    kept = [entry for entry in (existing or []) if entry.partition(":")[0] not in hosts]
+    return kept + [item for item in additions if item not in kept]
+
+
 def _merge_list(existing: list | None, additions: list | None) -> list | None:
     if additions is None:
         return existing
@@ -377,7 +392,7 @@ def _create_container(
             "mounts": mounts,
             "devices": hc.get("Devices"),
             "device_cgroup_rules": hc.get("DeviceCgroupRules"),
-            "extra_hosts": hc.get("ExtraHosts"),
+            "extra_hosts": _merge_extra_hosts(hc.get("ExtraHosts"), overrides.get("add_hosts")),
             "restart_policy": hc.get("RestartPolicy"),
             "log_config": hc.get("LogConfig"),
             "privileged": hc.get("Privileged", False),
@@ -551,6 +566,14 @@ def run_selftest() -> int:
         ) == {"32400/tcp": [{"HostIp": "127.0.0.1", "HostPort": "32400"}]}
         assert _parse_size("256m") == 256 * 1024 * 1024
         assert _parse_tmpfs(["/tmp:rw,noexec"]) == {"/tmp": "rw,noexec"}
+        assert _merge_extra_hosts(["a.org:1.1.1.1", "b.org:2.2.2.2"], None) == [
+            "a.org:1.1.1.1",
+            "b.org:2.2.2.2",
+        ]
+        assert _merge_extra_hosts(
+            ["a.org:1.1.1.1", "b.org:2.2.2.2"], ["a.org:3.3.3.3", "a.org:4.4.4.4"]
+        ) == ["b.org:2.2.2.2", "a.org:3.3.3.3", "a.org:4.4.4.4"]
+        assert _merge_extra_hosts(None, ["c.org:5.5.5.5"]) == ["c.org:5.5.5.5"]
 
         binds = ["warp-data:/var/lib/cloudflare-warp:rw", "/host/path:/data"]
         anon_name = "3cc8e5289c46602e2d9ab0deb1b86a402f81e27f9053f90cfd783872ca0e76b0"
@@ -659,6 +682,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cap-drop", action="append", default=[], help="remplace les capabilities droppées")
     parser.add_argument("--cap-add", action="append", default=[], help="remplace les capabilities ajoutées")
     parser.add_argument("--group-add", action="append", default=[], help="ajoute un groupe")
+    parser.add_argument("--add-host", action="append", default=[], metavar="HOTE:IP",
+                        help="ajoute ou remplace une entrée /etc/hosts (répétable)")
     parser.add_argument("--tmpfs", action="append", default=[], metavar="DEST[:OPTS]",
                         help="ajoute un tmpfs")
     parser.add_argument("--shm-size", default=None, help="taille de /dev/shm (ex. 256m)")
@@ -686,6 +711,7 @@ def main(argv: list[str] | None = None) -> int:
         "cap_drop": args.cap_drop or None,
         "cap_add": args.cap_add or None,
         "group_add": args.group_add or None,
+        "add_hosts": args.add_host or None,
         "tmpfs": _parse_tmpfs(args.tmpfs),
         "shm_size": _parse_size(args.shm_size),
         "read_only": True if args.read_only else None,
